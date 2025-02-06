@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // handlerWithSpanContext adds attributes from the span context
@@ -67,4 +69,36 @@ func SetupLogging() {
 	instrumentedHandler := handlerWithSpanContext(jsonHandler)
 	// Set this handler as the global slog handler.
 	slog.SetDefault(slog.New(instrumentedHandler))
+}
+
+// SetupZapLogging configures a Zap logger with OpenTelemetry integration
+// and sets it as the global logger.
+func SetupZapLogging() *zap.Logger {
+	config := zap.NewProductionConfig()
+	config.EncoderConfig.TimeKey = "timestamp"
+	config.EncoderConfig.MessageKey = "message"
+	config.EncoderConfig.LevelKey = "severity"
+	config.EncoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
+
+	logger, err := config.Build()
+	if err != nil {
+		// Fallback to default logger if setup fails
+		logger, _ = zap.NewProduction()
+	}
+
+	// Set as global logger
+	zap.ReplaceGlobals(logger)
+	return logger
+}
+
+// WithTraceContext creates a new logger with OpenTelemetry trace context added as fields
+func WithTraceContext(ctx context.Context, logger *zap.Logger) *zap.Logger {
+	if s := trace.SpanContextFromContext(ctx); s.IsValid() {
+		return logger.With(
+			zap.String("logging.googleapis.com/trace", s.TraceID().String()),
+			zap.String("logging.googleapis.com/spanId", s.SpanID().String()),
+			zap.Bool("logging.googleapis.com/trace_sampled", s.TraceFlags().IsSampled()),
+		)
+	}
+	return logger
 }
