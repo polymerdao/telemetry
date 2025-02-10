@@ -7,7 +7,9 @@ import (
 	"net/http"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -15,7 +17,10 @@ import (
 func TracingMiddleware(next http.Handler) http.Handler {
 	// Use the otelhttp handler with custom options
 	return otelhttp.NewHandler(
-		next,
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		}),
 		"http_server",
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			var request struct {
