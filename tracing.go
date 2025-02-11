@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
-	"go.opentelemetry.io/contrib/detectors/gcp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -86,8 +85,5 @@ func GetResource(ctx context.Context, serviceName string) (*resource.Resource, e
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
 		),
-		resource.WithDetectors(gcp.NewDetector()),
-		resource.WithTelemetrySDK(),
-		resource.WithFromEnv(),
 	)
 }
