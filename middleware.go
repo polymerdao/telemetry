@@ -14,14 +14,9 @@ import (
 )
 
 // TracingMiddleware wraps an http.Handler with OpenTelemetry tracing
-func TracingMiddleware(next http.Handler) http.Handler {
-	// Use the otelhttp handler with custom options
-	return otelhttp.NewHandler(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
-			next.ServeHTTP(w, r.WithContext(ctx))
-		}),
-		"http_server",
+func TracingMiddleware(next http.Handler, opts ...otelhttp.Option) http.Handler {
+	// Default options
+	defaultOpts := []otelhttp.Option{
 		otelhttp.WithSpanNameFormatter(func(operation string, r *http.Request) string {
 			var request struct {
 				Method string `json:"method"`
@@ -43,5 +38,18 @@ func TracingMiddleware(next http.Handler) http.Handler {
 		otelhttp.WithSpanOptions(trace.WithAttributes(
 			attribute.String("server.type", "http"),
 		)),
+	}
+
+	// Combine default options with custom options
+	allOpts := append(defaultOpts, opts...)
+
+	// Use the otelhttp handler with combined options
+	return otelhttp.NewHandler(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			next.ServeHTTP(w, r.WithContext(ctx))
+		}),
+		"http_server",
+		allOpts...,
 	)
 }
