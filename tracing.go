@@ -7,6 +7,7 @@ import (
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -17,7 +18,17 @@ type filterSampler struct {
 	baseSampler sdktrace.Sampler
 }
 
+var DropSpanAttribute = attribute.Bool("drop", true)
+
 func (f *filterSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	// Check for drop attribute
+	for _, attr := range p.Attributes {
+		if attr.Key == DropSpanAttribute.Key && attr.Value.AsBool() {
+			return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+		}
+	}
+
+	// Drop specific spans by name
 	if p.Name == "google.devtools.cloudtrace.v2.TraceService/BatchWriteSpans" {
 		return sdktrace.SamplingResult{Decision: sdktrace.Drop}
 	}
