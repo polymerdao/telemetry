@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go.opentelemetry.io/otel/trace"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/otel"
@@ -129,4 +130,17 @@ func GetResource(ctx context.Context, serviceName string) (*resource.Resource, e
 			semconv.ServiceName(serviceName),
 		),
 	)
+}
+
+// GetTelemetryParentContext creates a new context with OpenTelemetry trace context from a traceID
+func GetTelemetryParentContext(ctx context.Context, traceID string) context.Context {
+	// Create a SpanContext for the original trace
+	originalTraceID, _ := trace.TraceIDFromHex(traceID)
+	parentSpanContext := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID:    originalTraceID,
+		SpanID:     trace.SpanID{},
+		TraceFlags: trace.FlagsSampled, // Ensure the trace is sampled
+		Remote:     true,               // Indicates this is a remote context
+	})
+	return trace.ContextWithRemoteSpanContext(ctx, parentSpanContext)
 }
