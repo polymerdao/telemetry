@@ -6,8 +6,6 @@ import (
 	"os"
 
 	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 // handlerWithSpanContext adds attributes from the span context
@@ -62,43 +60,21 @@ func replacer(groups []string, a slog.Attr) slog.Attr {
 
 // [END opentelemetry_instrumentation_spancontext_logger]
 
-func SetupLogging() {
-	// Use json as our base logging format.
-	jsonHandler := slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{ReplaceAttr: replacer})
+func SetupLogging(level slog.Level, json bool) {
+	opts := &slog.HandlerOptions{
+		Level:       level,
+		ReplaceAttr: replacer,
+	}
+
+	var handler slog.Handler
+	if json {
+		handler = slog.NewJSONHandler(os.Stdout, opts)
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, opts)
+	}
+
 	// Add span context attributes when Context is passed to logging calls.
-	instrumentedHandler := handlerWithSpanContext(jsonHandler)
+	instrumentedHandler := handlerWithSpanContext(handler)
 	// Set this handler as the global slog handler.
 	slog.SetDefault(slog.New(instrumentedHandler))
-}
-
-// SetupZapLogging configures a Zap logger with OpenTelemetry integration
-// and sets it as the global logger.
-func SetupZapLogging() *zap.Logger {
-	config := zap.NewProductionConfig()
-	config.EncoderConfig.TimeKey = "timestamp"
-	config.EncoderConfig.MessageKey = "message"
-	config.EncoderConfig.LevelKey = "severity"
-	config.EncoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
-
-	logger, err := config.Build()
-	if err != nil {
-		// Fallback to default logger if setup fails
-		logger, _ = zap.NewProduction()
-	}
-
-	// Set as global logger
-	zap.ReplaceGlobals(logger)
-	return logger
-}
-
-// WithTraceContext creates a new logger with OpenTelemetry trace context added as fields
-func WithTraceContext(ctx context.Context, logger *zap.Logger) *zap.Logger {
-	if s := trace.SpanContextFromContext(ctx); s.IsValid() {
-		return logger.With(
-			zap.String("logging.googleapis.com/trace", s.TraceID().String()),
-			zap.String("logging.googleapis.com/spanId", s.SpanID().String()),
-			zap.Bool("logging.googleapis.com/trace_sampled", s.TraceFlags().IsSampled()),
-		)
-	}
-	return logger
 }
