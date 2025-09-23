@@ -2,8 +2,10 @@ package telemetry
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"go.opentelemetry.io/otel/trace"
 )
@@ -60,14 +62,20 @@ func replacer(groups []string, a slog.Attr) slog.Attr {
 
 // [END opentelemetry_instrumentation_spancontext_logger]
 
-func SetupLogging(level slog.Level, json bool) {
+func SetupLogging(level, format string) {
+	var lvl slog.Level
+	if err := lvl.UnmarshalText([]byte(level)); err != nil {
+		fmt.Fprintf(os.Stderr, "invalid log level %q, defaulting to info: %v\n", level, err)
+		lvl = slog.LevelInfo
+	}
+
 	opts := &slog.HandlerOptions{
-		Level:       level,
+		Level:       lvl,
 		ReplaceAttr: replacer,
 	}
 
 	var handler slog.Handler
-	if json {
+	if strings.ToLower(format) == "json" {
 		handler = slog.NewJSONHandler(os.Stdout, opts)
 	} else {
 		handler = slog.NewTextHandler(os.Stdout, opts)
