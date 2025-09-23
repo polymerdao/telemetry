@@ -19,7 +19,7 @@ func TestSetupLogging(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	SetupLogging(slog.LevelInfo, true)
+	SetupLogging("info", "json")
 
 	// Log a test message
 	slog.Info("test message")
