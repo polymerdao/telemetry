@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
-	"os"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -14,28 +13,19 @@ import (
 )
 
 func TestSetupLogging(t *testing.T) {
-	// Capture stdout
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	SetupLogging("info", "json")
+	var buf bytes.Buffer
+	SetupLoggingWithWriter("info", "json", &buf)
 
 	// Log a test message
 	slog.Info("test message")
 
-	// Reset stdout
-	require.NoError(t, w.Close())
-	os.Stdout = old
-
-	// Read captured output
-	var buf bytes.Buffer
-	_, err := io.Copy(&buf, r)
-	require.NoError(t, err)
-
 	// Parse JSON output
 	var logEntry map[string]any
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &logEntry))
+
+	for key, value := range logEntry {
+		t.Logf("%s: %v", key, value)
+	}
 
 	// Verify log format
 	require.Equal(t, "test message", logEntry["message"].(string))
@@ -43,13 +33,19 @@ func TestSetupLogging(t *testing.T) {
 	// Check for timestamp field
 	_, ok := logEntry["timestamp"].(string)
 	require.True(t, ok, "Expected timestamp field")
+
+	pc, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+
+	require.Equal(t, file, logEntry["source"].(map[string]any)["file"])
+	require.Equal(t, runtime.FuncForPC(pc).Name(), logEntry["source"].(map[string]any)["function"])
+	require.NotEmpty(t, logEntry["source"].(map[string]any)["line"])
 }
 
 func TestHandlerWithSpanContext(t *testing.T) {
 	// Create a buffer to capture log output
 	var buf bytes.Buffer
-	handler := slog.NewJSONHandler(&buf, nil)
-	instrumentedHandler := newOtelSlogHandler(handler)
+	SetupLoggingWithWriter("info", "json", &buf)
 
 	// Create a context with trace
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
@@ -60,28 +56,17 @@ func TestHandlerWithSpanContext(t *testing.T) {
 	ctx := trace.ContextWithSpanContext(context.Background(), sc)
 
 	// Log with trace context
-	logger := slog.New(instrumentedHandler)
-	logger.InfoContext(ctx, "test message")
+	slog.InfoContext(ctx, "test message")
 
 	// Parse JSON output
-	var logEntry map[string]interface{}
-	if err := json.Unmarshal(buf.Bytes(), &logEntry); err != nil {
-		t.Fatalf("Failed to parse JSON log output: %v", err)
+	var logEntry map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &logEntry))
+
+	for key, value := range logEntry {
+		t.Logf("%s: %v", key, value)
 	}
 
-	// Check trace fields
-	traceID, ok := logEntry["logging.googleapis.com/trace"].(string)
-	if !ok || traceID != "01000000000000000000000000000000" {
-		t.Errorf("Expected trace ID '01000000000000000000000000000000', got %v", traceID)
-	}
-
-	spanID, ok := logEntry["logging.googleapis.com/spanId"].(string)
-	if !ok || spanID != "0200000000000000" {
-		t.Errorf("Expected span ID '0200000000000000', got %v", spanID)
-	}
-
-	sampled, ok := logEntry["logging.googleapis.com/trace_sampled"].(bool)
-	if !ok || !sampled {
-		t.Errorf("Expected trace_sampled to be true")
-	}
+	require.Equal(t, "01000000000000000000000000000000", logEntry["logging.googleapis.com/trace"].(string))
+	require.Equal(t, "0200000000000000", logEntry["logging.googleapis.com/spanId"].(string))
+	require.True(t, logEntry["logging.googleapis.com/trace_sampled"].(bool))
 }
