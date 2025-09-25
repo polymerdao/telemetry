@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -64,9 +65,11 @@ func replacer(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-// [END opentelemetry_instrumentation_spancontext_logger]
-
 func SetupLogging(level, format string) {
+	SetupLoggingWithWriter(level, format, os.Stdout)
+}
+
+func SetupLoggingWithWriter(level, format string, w io.Writer) {
 	var lvl slog.Level
 	if err := lvl.UnmarshalText([]byte(level)); err != nil {
 		fmt.Fprintf(os.Stderr, "invalid log level %q, defaulting to info: %v\n", level, err)
@@ -76,13 +79,14 @@ func SetupLogging(level, format string) {
 	opts := &slog.HandlerOptions{
 		Level:       lvl,
 		ReplaceAttr: replacer,
+		AddSource:   true,
 	}
 
 	var handler slog.Handler
 	if strings.ToLower(format) == "json" {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(w, opts)
 	} else {
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(w, opts)
 	}
 
 	// Wrap with our OpenTelemetry-aware handler that works with child loggers
