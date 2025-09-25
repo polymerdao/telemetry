@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.opentelemetry.io/otel/trace"
+	"log/slog"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/otel"
@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type filterSampler struct {
@@ -132,10 +133,15 @@ func GetResource(ctx context.Context, serviceName string) (*resource.Resource, e
 	)
 }
 
-// GetTelemetryParentContext creates a new context with OpenTelemetry trace context from a traceID
-func GetTelemetryParentContext(ctx context.Context, traceID string) context.Context {
+// GetParentContext creates a new context with OpenTelemetry trace context from a traceID
+func GetParentContext(ctx context.Context, traceID string) context.Context {
 	// Create a SpanContext for the original trace
-	originalTraceID, _ := trace.TraceIDFromHex(traceID)
+	originalTraceID, err := trace.TraceIDFromHex(traceID)
+	if err != nil {
+		// If the traceID is invalid, return the original context
+		slog.Warn("Invalid traceID format", "traceID", traceID, "error", err)
+		return ctx
+	}
 	parentSpanContext := trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    originalTraceID,
 		SpanID:     trace.SpanID{},

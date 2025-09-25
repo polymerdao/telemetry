@@ -49,7 +49,7 @@ func TestHandlerWithSpanContext(t *testing.T) {
 	// Create a buffer to capture log output
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, nil)
-	instrumentedHandler := handlerWithSpanContext(handler)
+	instrumentedHandler := newOtelSlogHandler(handler)
 
 	// Create a context with trace
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
@@ -64,7 +64,7 @@ func TestHandlerWithSpanContext(t *testing.T) {
 	logger.InfoContext(ctx, "test message")
 
 	// Parse JSON output
-	var logEntry map[string]interface{}
+	var logEntry map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &logEntry); err != nil {
 		t.Fatalf("Failed to parse JSON log output: %v", err)
 	}
