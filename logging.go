@@ -10,36 +10,40 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// handlerWithSpanContext adds attributes from the span context
-// [START opentelemetry_instrumentation_spancontext_logger]
-func handlerWithSpanContext(handler slog.Handler) *spanContextLogHandler {
-	return &spanContextLogHandler{Handler: handler}
+// otelSlogHandler wraps a slog.Handler to automatically add OpenTelemetry trace context
+// This handler works with child loggers created using With()
+type otelSlogHandler struct {
+	handler slog.Handler
 }
 
-// spanContextLogHandler is a slog.Handler which adds attributes from the
-// span context.
-type spanContextLogHandler struct {
-	slog.Handler
+func newOtelSlogHandler(handler slog.Handler) *otelSlogHandler {
+	return &otelSlogHandler{handler: handler}
 }
 
-// Handle overrides slog.Handler's Handle method. This adds attributes from the
-// span context to the slog.Record.
-func (t *spanContextLogHandler) Handle(ctx context.Context, record slog.Record) error {
-	// Get the SpanContext from the context.
+func (h *otelSlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.handler.Enabled(ctx, level)
+}
+
+func (h *otelSlogHandler) Handle(ctx context.Context, record slog.Record) error {
+	// Get the SpanContext from the context and add trace attributes
+	// following Cloud Logging structured log format described in:
+	// https://cloud.google.com/logging/docs/structured-logging#special-payload-fields
 	if s := trace.SpanContextFromContext(ctx); s.IsValid() {
-		// Add trace context attributes following Cloud Logging structured log format described
-		// in https://cloud.google.com/logging/docs/structured-logging#special-payload-fields
 		record.AddAttrs(
-			slog.Any("logging.googleapis.com/trace", s.TraceID()),
-		)
-		record.AddAttrs(
-			slog.Any("logging.googleapis.com/spanId", s.SpanID()),
-		)
-		record.AddAttrs(
+			slog.String("logging.googleapis.com/trace", s.TraceID().String()),
+			slog.String("logging.googleapis.com/spanId", s.SpanID().String()),
 			slog.Bool("logging.googleapis.com/trace_sampled", s.TraceFlags().IsSampled()),
 		)
 	}
-	return t.Handler.Handle(ctx, record)
+	return h.handler.Handle(ctx, record)
+}
+
+func (h *otelSlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &otelSlogHandler{handler: h.handler.WithAttrs(attrs)}
+}
+
+func (h *otelSlogHandler) WithGroup(name string) slog.Handler {
+	return &otelSlogHandler{handler: h.handler.WithGroup(name)}
 }
 
 func replacer(groups []string, a slog.Attr) slog.Attr {
@@ -81,8 +85,9 @@ func SetupLogging(level, format string) {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	// Add span context attributes when Context is passed to logging calls.
-	instrumentedHandler := handlerWithSpanContext(handler)
+	// Wrap with our OpenTelemetry-aware handler that works with child loggers
+	otelHandler := newOtelSlogHandler(handler)
+
 	// Set this handler as the global slog handler.
-	slog.SetDefault(slog.New(instrumentedHandler))
+	slog.SetDefault(slog.New(otelHandler))
 }

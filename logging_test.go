@@ -49,7 +49,7 @@ func TestHandlerWithSpanContext(t *testing.T) {
 	// Create a buffer to capture log output
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, nil)
-	instrumentedHandler := handlerWithSpanContext(handler)
+	instrumentedHandler := newOtelSlogHandler(handler)
 
 	// Create a context with trace
 	sc := trace.NewSpanContext(trace.SpanContextConfig{
