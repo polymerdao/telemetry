@@ -1,8 +1,14 @@
 package telemetry
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
@@ -78,4 +84,35 @@ func (s *testSampler) ShouldSample(parameters sdktrace.SamplingParameters) sdktr
 
 func (s *testSampler) Description() string {
 	return "test sampler"
+}
+
+func TestLoggerWithNewTracer(t *testing.T) {
+	var buf bytes.Buffer
+	SetupLoggingWithWriter("info", "json", &buf)
+
+	ctx := GetParentContext(context.Background(), "01000000000000000000000000000000")
+
+	x := otel.Tracer("foo")
+	ctx, span := x.Start(ctx, "bar")
+	defer span.End()
+
+	// tr := NewTracer("test-tracer")
+	// ctx, span := tr.Span(ctx)
+	// defer span.End()
+
+	t.Logf("TraceID: %s, SpanID: %s", span.SpanContext().TraceID(), span.SpanContext().SpanID())
+	// Log with trace context
+	slog.InfoContext(ctx, "test message")
+
+	var logEntry map[string]any
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &logEntry))
+
+	for key, value := range logEntry {
+		t.Logf("%s: %v", key, value)
+	}
+
+	// Check that trace fields are present
+	require.Contains(t, logEntry, "logging.googleapis.com/trace")
+	require.Contains(t, logEntry, "logging.googleapis.com/spanId")
+	require.Contains(t, logEntry, "logging.googleapis.com/trace_sampled")
 }
