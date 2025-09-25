@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"go.opentelemetry.io/otel/trace"
+	"log/slog"
+	"runtime"
+	"strings"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/otel"
@@ -13,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type filterSampler struct {
@@ -132,15 +135,52 @@ func GetResource(ctx context.Context, serviceName string) (*resource.Resource, e
 	)
 }
 
-// GetTelemetryParentContext creates a new context with OpenTelemetry trace context from a traceID
-func GetTelemetryParentContext(ctx context.Context, traceID string) context.Context {
+// GetParentContext creates a new context with OpenTelemetry trace context from a traceID
+func GetParentContext(ctx context.Context, traceID string) context.Context {
 	// Create a SpanContext for the original trace
-	originalTraceID, _ := trace.TraceIDFromHex(traceID)
-	parentSpanContext := trace.NewSpanContext(trace.SpanContextConfig{
+	originalTraceID, err := trace.TraceIDFromHex(traceID)
+	if err != nil {
+		slog.Warn("invalid trace ID format. will return original context", "traceID", traceID, "error", err)
+		return ctx
+	}
+
+	return trace.ContextWithRemoteSpanContext(ctx, trace.NewSpanContext(trace.SpanContextConfig{
 		TraceID:    originalTraceID,
 		SpanID:     trace.SpanID{},
 		TraceFlags: trace.FlagsSampled, // Ensure the trace is sampled
 		Remote:     true,               // Indicates this is a remote context
-	})
-	return trace.ContextWithRemoteSpanContext(ctx, parentSpanContext)
+	}))
+}
+
+type tracer struct {
+	name   string
+	tracer trace.Tracer
+}
+
+type Tracer interface {
+	Span(ctx context.Context, opts ...trace.SpanStartOption) (context.Context, trace.Span)
+}
+
+func NewTracer(name string) Tracer {
+	return &tracer{
+		name:   name,
+		tracer: otel.Tracer(name),
+	}
+}
+
+// Span creates a new span with the caller function name appended to the tracer name.
+// For example, if the tracer name is "myapp" and the caller function is "DoWork",
+// the span name will be "myapp.DoWork".
+func (t *tracer) Span(ctx context.Context, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	caller := "<unknown>"
+	if pc, _, _, ok := runtime.Caller(1); ok {
+		fn := runtime.FuncForPC(pc).Name()
+		if lastDot := strings.LastIndex(fn, "."); lastDot != -1 {
+			caller = fn[lastDot+1:]
+		} else {
+			caller = fn // no dot found, use the whole string
+		}
+	}
+	spanName := fmt.Sprintf("%s.%s", t.name, caller)
+	return t.tracer.Start(ctx, spanName, opts...)
 }
