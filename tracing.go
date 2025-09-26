@@ -16,6 +16,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 type filterSampler struct {
@@ -183,4 +184,11 @@ func (t *tracer) Span(ctx context.Context, opts ...trace.SpanStartOption) (conte
 	}
 	spanName := fmt.Sprintf("%s.%s", t.name, caller)
 	return t.tracer.Start(ctx, spanName, opts...)
+}
+
+func NewNoopTracer() Tracer {
+	return &tracer{
+		name:   "noop",
+		tracer: noop.NewTracerProvider().Tracer("noop"),
+	}
 }
