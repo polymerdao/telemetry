@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"runtime"
 	"strings"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -72,7 +75,75 @@ func (d *dropSpanProcessor) ForceFlush(ctx context.Context) error {
 	return d.processor.ForceFlush(ctx)
 }
 
-// InitTracer initializes the OpenTelemetry tracer with google exporter and a drop span processor.
+// getExporterFromEnv returns the exporter type from environment variable OTEL_TRACES_EXPORTER.
+// Defaults to "gcp" if not set.
+func getExporterFromEnv() string {
+	if exporter := os.Getenv("OTEL_TRACES_EXPORTER"); exporter != "" {
+		return exporter
+	}
+	return "gcp" // default
+}
+
+// createGCPExporter creates a Google Cloud Platform trace exporter.
+func createGCPExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	return texporter.New()
+}
+
+// createAWSExporter creates an OTLP exporter configured for AWS X-Ray.
+// AWS X-Ray integration works by sending OTLP traces to AWS Distro for OpenTelemetry Collector
+// which then forwards them to X-Ray.
+func createAWSExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	// For AWS X-Ray, use OTLP endpoint - typically AWS ADOT Collector
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		// Default AWS ADOT Collector HTTP endpoint for X-Ray
+		endpoint = "http://localhost:4318"
+	}
+	
+	return otlptracehttp.New(
+		ctx,
+		otlptracehttp.WithEndpoint(endpoint),
+	)
+}
+
+// createOTLPExporter creates an OTLP HTTP trace exporter.
+func createOTLPExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	endpoint := os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://localhost:4318"
+	}
+	
+	return otlptracehttp.New(
+		ctx,
+		otlptracehttp.WithEndpoint(endpoint),
+	)
+}
+
+// createConsoleExporter creates a console/stdout trace exporter for development.
+func createConsoleExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	return stdouttrace.New(
+		stdouttrace.WithPrettyPrint(),
+	)
+}
+
+// createNoOpExporter creates a no-op exporter that discards all spans.
+func createNoOpExporter(ctx context.Context) (sdktrace.SpanExporter, error) {
+	// Return a no-op exporter that does nothing
+	return &noOpExporter{}, nil
+}
+
+// noOpExporter is a no-op span exporter.
+type noOpExporter struct{}
+
+func (e *noOpExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	return nil
+}
+
+func (e *noOpExporter) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+// InitTracer initializes the OpenTelemetry tracer with configurable exporter and a drop span processor.
 func InitTracer(ctx context.Context, serviceName string) (func(context.Context) error, error) {
 	var shutdownFuncs []func(context.Context) error
 
@@ -98,11 +169,30 @@ func InitTracer(ctx context.Context, serviceName string) (func(context.Context) 
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// Configure Trace Export to send spans as OTLP
-	exporter, err := texporter.New()
+	// Get exporter type from environment variable
+	exporterType := getExporterFromEnv()
+	
+	// Create the appropriate exporter based on configuration
+	var exporter sdktrace.SpanExporter
+	switch exporterType {
+	case "gcp":
+		exporter, err = createGCPExporter(ctx)
+	case "aws", "xray":
+		exporter, err = createAWSExporter(ctx)
+	case "otlp":
+		exporter, err = createOTLPExporter(ctx)
+	case "console", "stdout":
+		exporter, err = createConsoleExporter(ctx)
+	case "none", "noop":
+		exporter, err = createNoOpExporter(ctx)
+	default:
+		slog.Warn("unknown exporter type, defaulting to GCP", "type", exporterType)
+		exporter, err = createGCPExporter(ctx)
+	}
+	
 	if err != nil {
 		err = errors.Join(err, shutdown(ctx))
-		return shutdown, fmt.Errorf("failed to create trace exporter: %w", err)
+		return shutdown, fmt.Errorf("failed to create trace exporter (%s): %w", exporterType, err)
 	}
 
 	shutdownFuncs = append(shutdownFuncs, exporter.Shutdown)
