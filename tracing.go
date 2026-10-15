@@ -105,8 +105,6 @@ func InitTracer(ctx context.Context, serviceName string) (func(context.Context) 
 		return shutdown, fmt.Errorf("failed to create trace exporter: %w", err)
 	}
 
-	shutdownFuncs = append(shutdownFuncs, exporter.Shutdown)
-
 	// Create a BatchSpanProcessor and wrap it with the dropSpanProcessor.
 	batchProcessor := sdktrace.NewBatchSpanProcessor(exporter)
 	dropProcessor := NewDropSpanProcessor(batchProcessor)
